@@ -1,0 +1,236 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// ============ ENUMS (as String constants) ============
+
+// User roles
+// ADMIN - System administrator
+// MANAGER - Can approve timesheets
+// EMPLOYEE - Regular employee
+
+// Timesheet statuses
+// DRAFT - Employee is filling in
+// SUBMITTED - Employee submitted for approval
+// APPROVED - Manager approved
+// REJECTED - Manager rejected
+
+// Report types
+// FULL - Full monthly report (月末)
+// HALF - Half-month report (月半)
+
+// Project task categories
+// DESIGN - 設計業務
+// DRAFTING - 作図業務
+// MEETING - 打合せ
+// REVIEW - レビュー
+// OTHER - その他
+
+// Work types for daily entries
+// REGULAR - Normal workday (通常勤務)
+// PUBLIC_HOLIDAY - 公休 (public holiday, no work)
+// ANNUAL_LEAVE_AM - 年休 午前 (annual leave morning)
+// ANNUAL_LEAVE_PM - 年休 午後 (annual leave afternoon)
+// ANNUAL_LEAVE_FULL - 年休 終日 (annual leave full day)
+// HOLIDAY_WORK - 休出 (work on holiday)
+// SPECIAL_LEAVE - 特休 (special leave)
+// ABSENCE - 欠勤 (absence)
+// COMPENSATORY_LEAVE - 代休 (compensatory leave)
+
+// ============ MODELS ============
+
+model Department {
+  id        String     @id @default(cuid())
+  name      String     @unique
+  code      String     @default("")
+  order     Int        @default(0)
+  isActive  Boolean    @default(true)
+  createdAt DateTime   @default(now())
+  updatedAt DateTime   @updatedAt
+
+  divisions Division[]
+  employees User[]
+  managers  DepartmentManager[]
+}
+
+model Division {
+  id           String     @id @default(cuid())
+  name         String
+  order        Int        @default(0)
+  isActive     Boolean    @default(true)
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  groups       Group[]
+  employees    User[]
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  @@index([departmentId])
+}
+
+model Group {
+  id         String   @id @default(cuid())
+  name       String
+  order      Int      @default(0)
+  isActive   Boolean  @default(true)
+  divisionId String
+  division   Division @relation(fields: [divisionId], references: [id], onDelete: Cascade)
+  employees  User[]
+  createdAt  DateTime @default(now())
+  updatedAt  DateTime @updatedAt
+
+  @@index([divisionId])
+}
+
+model DepartmentManager {
+  id           String     @id @default(cuid())
+  departmentId String
+  department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
+  userId       String
+  user         User       @relation(fields: [userId], references: [id], onDelete: Cascade)
+  createdAt    DateTime   @default(now())
+
+  @@unique([departmentId, userId])
+  @@index([departmentId])
+  @@index([userId])
+}
+
+model User {
+  id          String   @id @default(cuid())
+  email       String   @unique
+  name        String
+  password    String   @default("demo123") // simplified for demo
+  role        String   @default("EMPLOYEE") // ADMIN, MANAGER, EMPLOYEE
+  employeeId  String?  @unique              // e.g. "202503"
+  departmentName  String   @default("") // legacy string field
+  divisionName    String   @default("")         // e.g. "第1CADデザイン室"
+  groupName       String   @default("")         // e.g. "技術第4G"
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  departmentId  String?
+  divisionId    String?
+  groupId       String?
+
+  department    Department?       @relation(fields: [departmentId], references: [id])
+  division      Division?         @relation(fields: [divisionId], references: [id])
+  group         Group?            @relation(fields: [groupId], references: [id])
+  managedDepartments DepartmentManager[]
+
+  // Relations
+  timesheetsCreated  Timesheet[]   @relation("TimesheetEmployee")
+  timesheetsApproved Timesheet[]   @relation("TimesheetApprover")
+  approvals          Approval[]
+
+  @@index([employeeId])
+  @@index([departmentId])
+  @@index([divisionId])
+  @@index([role])
+}
+
+model Timesheet {
+  id          String   @id @default(cuid())
+  employeeId  String
+  year        Int
+  month       Int      // 1-12
+  status      String   @default("DRAFT") // DRAFT, SUBMITTED, APPROVED, REJECTED
+  reportType  String   @default("FULL") // FULL, HALF
+  totalWorkDays       Float  @default(0)
+  totalOvertimeHours  Float  @default(0)
+  annualLeaveAM       Int    @default(0)
+  annualLeavePM       Int    @default(0)
+  annualLeaveFull     Int    @default(0)
+  holidayWorkDays     Int    @default(0)
+  holidayWorkHours    Float  @default(0)
+  compensatoryCurrent Float  @default(0)
+  compensatoryNext    Float  @default(0)
+  compensatoryAfter   Float  @default(0)
+  specialLeave        Int    @default(0)
+  absenceDays         Int    @default(0)
+  totalWorkHours      Float  @default(0)
+  submittedAt         DateTime?
+  approvedAt          DateTime?
+  approvedById        String?
+  managerComment      String  @default("")
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  employee  User             @relation("TimesheetEmployee", fields: [employeeId], references: [id])
+  approver  User?            @relation("TimesheetApprover", fields: [approvedById], references: [id])
+  entries   TimesheetEntry[]
+  approvals Approval[]
+
+  @@unique([employeeId, year, month, reportType])
+  @@index([status])
+  @@index([year, month])
+}
+
+model TimesheetEntry {
+  id          String @id @default(cuid())
+  timesheetId String
+  day         Int    // 1-31
+  workType    String @default("REGULAR") // REGULAR, PUBLIC_HOLIDAY, ANNUAL_LEAVE_AM, etc.
+  startTime   String @default("") // e.g. "08:30"
+  endTime     String @default("") // e.g. "17:30"
+  workHours   Float  @default(0)
+  breakMinutes Float @default(60) // default 60 min break
+  overtimeHours Float @default(0)
+  holidayWorkHours Float @default(0)
+  workContent String @default("") // 業務内容
+  overUnder  Float @default(0) // 過不足 - difference from standard 8h
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  timesheet Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  tasks      WorkTask[]
+
+  @@unique([timesheetId, day])
+  @@index([timesheetId])
+}
+
+model WorkTask {
+  id               String   @id @default(cuid())
+  timesheetEntryId String
+  project          String   @default("")   // プロジェクト名
+  category         String   @default("OTHER") // DESIGN, DRAFTING, MEETING, REVIEW, OTHER
+  hours            Float    @default(0)
+  createdAt        DateTime @default(now())
+  updatedAt        DateTime @updatedAt
+
+  // Relations
+  timesheetEntry TimesheetEntry @relation(fields: [timesheetEntryId], references: [id], onDelete: Cascade)
+
+  @@index([timesheetEntryId])
+}
+
+model Approval {
+  id          String   @id @default(cuid())
+  timesheetId String
+  approverId  String
+  action      String   // APPROVED, REJECTED
+  comment     String   @default("")
+  createdAt   DateTime @default(now())
+
+  // Relations
+  timesheet Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  approver  User      @relation(fields: [approverId], references: [id])
+
+  @@index([timesheetId])
+  @@index([approverId])
+}
+
+model SystemSettings {
+  id            String @id @default(cuid())
+  key           String @unique
+  value         String
+  description   String @default("")
+  updatedAt     DateTime @updatedAt
+}
