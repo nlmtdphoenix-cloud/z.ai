@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { mapTimesheetEmployee } from '@/lib/map-employee';
-import { getAuthUser, unauthorizedResponse } from '@/lib/auth';
+import { getAuthUser, unauthorizedResponse, forbiddenResponse } from '@/lib/auth';
 
 // GET /api/timesheets - List timesheets with filtering
 export async function GET(request: NextRequest) {
@@ -18,9 +18,14 @@ export async function GET(request: NextRequest) {
 
     const where: Record<string, unknown> = {};
 
-    if (employeeId) {
+    // Scope query by role: EMPLOYEE may only see their own timesheets.
+    // MANAGER/ADMIN may filter by any employeeId or see all.
+    if (authUser.role === 'EMPLOYEE') {
+      where.employeeId = authUser.userId;
+    } else if (employeeId) {
       where.employeeId = employeeId;
     }
+
     if (year) {
       where.year = parseInt(year, 10);
     }
@@ -40,6 +45,7 @@ export async function GET(request: NextRequest) {
             email: true,
             name: true,
             role: true,
+            grade: true,
             employeeId: true,
             departmentName: true,
             divisionName: true,
@@ -53,6 +59,7 @@ export async function GET(request: NextRequest) {
             email: true,
             name: true,
             role: true,
+            grade: true,
             employeeId: true,
             departmentName: true,
             divisionName: true,
@@ -106,6 +113,11 @@ export async function POST(request: NextRequest) {
       );
     }
 
+    // EMPLOYEE may only create their own timesheets.
+    if (authUser.role === 'EMPLOYEE' && employeeId !== authUser.userId) {
+      return forbiddenResponse('自分の勤務表のみ作成できます');
+    }
+
     if (year < 2000 || year > 2100) {
       return NextResponse.json(
         { error: 'Invalid year' },
@@ -126,7 +138,7 @@ export async function POST(request: NextRequest) {
         employeeId,
         year: parseInt(year, 10),
         month: parseInt(month, 10),
-        reportType: (reportType || 'FULL'),
+        reportType: (reportType || 'ZENHAN'),
       },
     });
 
@@ -164,6 +176,7 @@ export async function POST(request: NextRequest) {
             email: true,
             name: true,
             role: true,
+            grade: true,
             employeeId: true,
             departmentName: true,
             divisionName: true,

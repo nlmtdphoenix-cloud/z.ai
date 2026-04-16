@@ -6,8 +6,9 @@
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+  --font-sans: var(--font-dm-sans);
+  --font-display: var(--font-noto-serif-jp);
+  --font-mono: var(--font-dm-mono);
   --color-sidebar-ring: var(--sidebar-ring);
   --color-sidebar-border: var(--sidebar-border);
   --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
@@ -41,83 +42,163 @@
   --radius-md: calc(var(--radius) - 2px);
   --radius-lg: var(--radius);
   --radius-xl: calc(var(--radius) + 4px);
+
+  --color-vermillion: var(--vermillion);
+  --color-ink: var(--ink);
+  --color-washi: var(--washi);
+}
+
+/* ── Washi White palette ──────────────────────────────── */
+:root {
+  --radius: 0.375rem;
+
+  /* Washi paper grounds */
+  --background:       oklch(0.975 0.008 80);   /* warm ivory */
+  --surface:          oklch(0.992 0.004 80);   /* near-white card */
+  --surface-alt:      oklch(0.960 0.012 78);   /* slightly deeper ivory */
+  --washi:            oklch(0.975 0.008 80);
+
+  /* Ink blacks */
+  --foreground:       oklch(0.18 0.018 52);    /* deep ink */
+  --ink:              oklch(0.18 0.018 52);
+
+  /* Cards / popovers */
+  --card:             oklch(0.992 0.004 80);
+  --card-foreground:  oklch(0.18 0.018 52);
+  --popover:          oklch(0.992 0.004 80);
+  --popover-foreground: oklch(0.18 0.018 52);
+
+  /* Hanko vermillion — primary accent */
+  --primary:          oklch(0.50 0.21 27);     /* #C0392B-ish vermillion */
+  --primary-foreground: oklch(0.995 0.002 80);
+  --vermillion:       oklch(0.50 0.21 27);
+
+  /* Secondary surfaces */
+  --secondary:        oklch(0.940 0.016 78);
+  --secondary-foreground: oklch(0.18 0.018 52);
+
+  /* Muted tones */
+  --muted:            oklch(0.950 0.012 78);
+  --muted-foreground: oklch(0.52 0.022 60);    /* warm gray */
+
+  /* Accent — ink gray */
+  --accent:           oklch(0.940 0.016 78);
+  --accent-foreground: oklch(0.18 0.018 52);
+
+  /* Destructive */
+  --destructive:      oklch(0.50 0.22 27);
+
+  /* Borders — hairline warm gray */
+  --border:           oklch(0.880 0.018 75);
+  --input:            oklch(0.880 0.018 75);
+  --ring:             oklch(0.50 0.21 27);
+
+  /* Charts */
+  --chart-1: oklch(0.50 0.21 27);
+  --chart-2: oklch(0.55 0.14 145);
+  --chart-3: oklch(0.55 0.12 220);
+  --chart-4: oklch(0.60 0.10 65);
+  --chart-5: oklch(0.52 0.15 290);
+
+  /* Sidebar */
+  --sidebar:          oklch(0.960 0.014 78);
+  --sidebar-foreground: oklch(0.18 0.018 52);
+  --sidebar-primary:  oklch(0.50 0.21 27);
+  --sidebar-primary-foreground: oklch(0.995 0.002 80);
+  --sidebar-accent:   oklch(0.940 0.016 78);
+  --sidebar-accent-foreground: oklch(0.18 0.018 52);
+  --sidebar-border:   oklch(0.870 0.020 75);
+  --sidebar-ring:     oklch(0.50 0.21 27);
 }
 
 :root {
-  --radius: 0.625rem;
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.145 0 0);
-  --card: oklch(1 0 0);
-  --card-foreground: oklch(0.145 0 0);
-  --popover: oklch(1 0 0);
-  --popover-foreground: oklch(0.145 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.556 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --destructive: oklch(0.577 0.245 27.325);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.708 0 0);
-  --chart-1: oklch(0.646 0.222 41.116);
-  --chart-2: oklch(0.6 0.118 184.704);
-  --chart-3: oklch(0.398 0.07 227.392);
-  --chart-4: oklch(0.828 0.189 84.429);
-  --chart-5: oklch(0.769 0.188 70.08);
-  --sidebar: oklch(0.985 0 0);
-  --sidebar-foreground: oklch(0.145 0 0);
-  --sidebar-primary: oklch(0.205 0 0);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.97 0 0);
-  --sidebar-accent-foreground: oklch(0.205 0 0);
-  --sidebar-border: oklch(0.922 0 0);
-  --sidebar-ring: oklch(0.708 0 0);
-}
-
-.dark {
-  --background: oklch(0.145 0 0);
-  --foreground: oklch(0.985 0 0);
-  --card: oklch(0.205 0 0);
-  --card-foreground: oklch(0.985 0 0);
-  --popover: oklch(0.205 0 0);
-  --popover-foreground: oklch(0.985 0 0);
-  --primary: oklch(0.922 0 0);
-  --primary-foreground: oklch(0.205 0 0);
-  --secondary: oklch(0.269 0 0);
-  --secondary-foreground: oklch(0.985 0 0);
-  --muted: oklch(0.269 0 0);
-  --muted-foreground: oklch(0.708 0 0);
-  --accent: oklch(0.269 0 0);
-  --accent-foreground: oklch(0.985 0 0);
-  --destructive: oklch(0.704 0.191 22.216);
-  --border: oklch(1 0 0 / 10%);
-  --input: oklch(1 0 0 / 15%);
-  --ring: oklch(0.556 0 0);
-  --chart-1: oklch(0.488 0.243 264.376);
-  --chart-2: oklch(0.696 0.17 162.48);
-  --chart-3: oklch(0.769 0.188 70.08);
-  --chart-4: oklch(0.627 0.265 303.9);
-  --chart-5: oklch(0.645 0.246 16.439);
-  --sidebar: oklch(0.205 0 0);
-  --sidebar-foreground: oklch(0.985 0 0);
-  --sidebar-primary: oklch(0.488 0.243 264.376);
-  --sidebar-primary-foreground: oklch(0.985 0 0);
-  --sidebar-accent: oklch(0.269 0 0);
-  --sidebar-accent-foreground: oklch(0.985 0 0);
-  --sidebar-border: oklch(1 0 0 / 10%);
-  --sidebar-ring: oklch(0.556 0 0);
+  color-scheme: light;
 }
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply border-border outline-ring/40;
+  }
+  html {
+    color-scheme: light;
   }
   body {
     @apply bg-background text-foreground;
+    font-family: var(--font-dm-sans), var(--font-noto-serif-jp), system-ui, sans-serif;
+  }
+  .font-display {
+    font-family: var(--font-noto-serif-jp), serif;
+  }
+  .mono-num {
+    font-family: var(--font-dm-mono), monospace;
+    font-variant-numeric: tabular-nums;
   }
 }
-/* trigger recompile */
+
+/* ── Washi paper noise texture ─────────────────────────── */
+.washi-texture {
+  position: relative;
+}
+.washi-texture::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='300' height='300'%3E%3Cfilter id='noise'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.75' numOctaves='4' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23noise)' opacity='0.03'/%3E%3C/svg%3E");
+  pointer-events: none;
+  border-radius: inherit;
+  z-index: 0;
+}
+
+/* ── Custom scrollbar — ink thin ───────────────────────── */
+::-webkit-scrollbar { width: 4px; height: 4px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: oklch(0.80 0.018 75);
+  border-radius: 2px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: oklch(0.50 0.21 27 / 0.5);
+}
+
+/* ── Hairline separator ─────────────────────────────────── */
+.ink-line {
+  height: 1px;
+  background: linear-gradient(90deg, transparent, oklch(0.85 0.018 75), transparent);
+}
+
+/* ── Vermillion glow on focus ───────────────────────────── */
+.vermillion-focus:focus-within {
+  box-shadow: 0 0 0 2px oklch(0.50 0.21 27 / 0.15);
+}
+
+/* ── Hanko stamp badge ──────────────────────────────────── */
+.hanko {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border: 1.5px solid oklch(0.50 0.21 27);
+  color: oklch(0.50 0.21 27);
+  border-radius: 3px;
+  font-family: var(--font-noto-serif-jp), serif;
+  letter-spacing: 0.05em;
+  padding: 1px 6px;
+  font-size: 10px;
+  font-weight: 500;
+}
+
+/* ── Page fade-in ───────────────────────────────────────── */
+@keyframes fadeUp {
+  from { opacity: 0; transform: translateY(10px); }
+  to   { opacity: 1; transform: translateY(0); }
+}
+.fade-up   { animation: fadeUp 0.4s cubic-bezier(0.22,1,0.36,1) both; }
+.fade-up-1 { animation-delay: 0.05s; }
+.fade-up-2 { animation-delay: 0.10s; }
+.fade-up-3 { animation-delay: 0.15s; }
+.fade-up-4 { animation-delay: 0.22s; }
+
+/* ── Status tones (light) ───────────────────────────────── */
+.status-draft     { background: oklch(0.94 0.010 75);   color: oklch(0.52 0.022 60); }
+.status-submitted { background: oklch(0.92 0.08 240);   color: oklch(0.40 0.14 240); }
+.status-approved  { background: oklch(0.92 0.08 145);   color: oklch(0.38 0.16 145); }
+.status-rejected  { background: oklch(0.94 0.10 27);    color: oklch(0.46 0.20 27);  }

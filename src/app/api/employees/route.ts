@@ -40,6 +40,8 @@ export async function GET(request: NextRequest) {
         email: true,
         name: true,
         role: true,
+        grade: true,
+        clientSide: true,
         employeeId: true,
         departmentId: true,
         divisionId: true,
@@ -53,7 +55,7 @@ export async function GET(request: NextRequest) {
           select: { id: true, name: true },
         },
         division: {
-          select: { id: true, name: true },
+          select: { id: true, name: true, isVirtual: true },
         },
         group: {
           select: { id: true, name: true },
@@ -62,7 +64,14 @@ export async function GET(request: NextRequest) {
       orderBy: { name: 'asc' },
     });
 
-    return NextResponse.json({ data: employees.map(mapEmployeeFields) });
+    // Non-admin/manager users see the org directory but without contact details
+    const isPrivileged = authUser.role === 'ADMIN' || authUser.role === 'MANAGER';
+    const mapped = employees.map(mapEmployeeFields).map((emp) => {
+      if (isPrivileged) return emp;
+      return { ...emp, email: '' };
+    });
+
+    return NextResponse.json({ data: mapped });
   } catch (error) {
     console.error('Failed to list employees:', error);
     return NextResponse.json(
@@ -84,6 +93,8 @@ export async function POST(request: NextRequest) {
       name,
       email,
       role,
+      grade,
+      clientSide,
       employeeId,
       department,
       division,
@@ -159,13 +170,15 @@ export async function POST(request: NextRequest) {
       if (!grpName) resolvedGrpName = grp.name;
     }
 
-    const hashedPassword = await hashPassword('demo123');
+    const hashedPassword = await hashPassword('password123');
 
     const employee = await db.user.create({
       data: {
         name,
         email,
         role: role || 'EMPLOYEE',
+        grade: grade || '',
+        clientSide: clientSide || '',
         employeeId: employeeId || '',
         departmentId: deptId || null,
         divisionId: divId || null,
@@ -181,6 +194,8 @@ export async function POST(request: NextRequest) {
         email: true,
         name: true,
         role: true,
+        grade: true,
+        clientSide: true,
         employeeId: true,
         departmentId: true,
         divisionId: true,
@@ -189,15 +204,9 @@ export async function POST(request: NextRequest) {
         divisionName: true,
         groupName: true,
         isActive: true,
-        department: {
-          select: { id: true, name: true },
-        },
-        division: {
-          select: { id: true, name: true },
-        },
-        group: {
-          select: { id: true, name: true },
-        },
+        department: { select: { id: true, name: true } },
+        division: { select: { id: true, name: true, isVirtual: true } },
+        group: { select: { id: true, name: true } },
       },
     });
 
@@ -224,6 +233,8 @@ export async function PUT(request: NextRequest) {
       name,
       email,
       role,
+      grade,
+      clientSide,
       employeeId,
       department,
       division,
@@ -252,83 +263,67 @@ export async function PUT(request: NextRequest) {
       );
     }
 
-    // Support both legacy field names and new field names
-    const deptId = departmentId ?? '';
-    const divId = divisionId ?? '';
-    const grpId = groupId ?? '';
-    const deptName = department;
-    const divName = division;
-    const grpName = group;
-
-    // Build update data
+    // Build update data — only update fields that were explicitly sent in the request
+    // undefined = not sent = no change (prevents accidental data loss)
     const updateData: Record<string, unknown> = {};
     if (name !== undefined) updateData.name = name;
     if (email !== undefined) updateData.email = email;
     if (role !== undefined) updateData.role = role;
+    if (grade !== undefined) updateData.grade = grade;
+    if (clientSide !== undefined) updateData.clientSide = clientSide;
     if (employeeId !== undefined) updateData.employeeId = employeeId;
     if (isActive !== undefined) updateData.isActive = isActive;
 
-    // Handle department with validation and name resolution
-    if (deptId !== undefined) {
-      if (deptId) {
+    // Only update department/division/group if explicitly sent
+    if (departmentId !== undefined) {
+      if (departmentId) {
         const dept = await db.department.findUnique({
-          where: { id: deptId },
+          where: { id: departmentId },
           select: { name: true },
         });
         if (!dept) {
           return NextResponse.json({ error: '指定された部署が存在しません' }, { status: 400 });
         }
-        updateData.departmentId = deptId;
-        if (deptName === undefined) updateData.departmentName = dept.name;
+        updateData.departmentId = departmentId;
+        updateData.departmentName = dept.name;
       } else {
-        // Clearing department
         updateData.departmentId = null;
-        if (deptName === undefined) updateData.departmentName = '';
+        updateData.departmentName = '';
       }
-    } else if (deptName !== undefined) {
-      updateData.departmentName = deptName;
     }
 
-    // Handle division with validation and name resolution
-    if (divId !== undefined) {
-      if (divId) {
+    if (divisionId !== undefined) {
+      if (divisionId) {
         const div = await db.division.findUnique({
-          where: { id: divId },
+          where: { id: divisionId },
           select: { name: true },
         });
         if (!div) {
           return NextResponse.json({ error: '指定された室が存在しません' }, { status: 400 });
         }
-        updateData.divisionId = divId;
-        if (divName === undefined) updateData.divisionName = div.name;
+        updateData.divisionId = divisionId;
+        updateData.divisionName = div.name;
       } else {
-        // Clearing division
         updateData.divisionId = null;
-        if (divName === undefined) updateData.divisionName = '';
+        updateData.divisionName = '';
       }
-    } else if (divName !== undefined) {
-      updateData.divisionName = divName;
     }
 
-    // Handle group with validation and name resolution
-    if (grpId !== undefined) {
-      if (grpId) {
+    if (groupId !== undefined) {
+      if (groupId) {
         const grp = await db.group.findUnique({
-          where: { id: grpId },
+          where: { id: groupId },
           select: { name: true },
         });
         if (!grp) {
           return NextResponse.json({ error: '指定されたグループが存在しません' }, { status: 400 });
         }
-        updateData.groupId = grpId;
-        if (grpName === undefined) updateData.groupName = grp.name;
+        updateData.groupId = groupId;
+        updateData.groupName = grp.name;
       } else {
-        // Clearing group
         updateData.groupId = null;
-        if (grpName === undefined) updateData.groupName = '';
+        updateData.groupName = '';
       }
-    } else if (grpName !== undefined) {
-      updateData.groupName = grpName;
     }
 
     const employee = await db.user.update({
@@ -339,6 +334,8 @@ export async function PUT(request: NextRequest) {
         email: true,
         name: true,
         role: true,
+        grade: true,
+        clientSide: true,
         employeeId: true,
         departmentId: true,
         divisionId: true,
@@ -347,15 +344,9 @@ export async function PUT(request: NextRequest) {
         divisionName: true,
         groupName: true,
         isActive: true,
-        department: {
-          select: { id: true, name: true },
-        },
-        division: {
-          select: { id: true, name: true },
-        },
-        group: {
-          select: { id: true, name: true },
-        },
+        department: { select: { id: true, name: true } },
+        division: { select: { id: true, name: true, isVirtual: true } },
+        group: { select: { id: true, name: true } },
       },
     });
 

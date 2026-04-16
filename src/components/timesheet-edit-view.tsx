@@ -69,6 +69,7 @@ import {
   calculateOvertime,
   calculateOverUnder,
   calculateMonthlyCumulative,
+  isValidTimeRange,
 } from '@/lib/calculations';
 import type {
   Timesheet,
@@ -77,6 +78,7 @@ import type {
   ReportType,
   WorkTask,
   TaskCategory,
+  ReportTask,
 } from '@/lib/types';
 import { toast } from 'sonner';
 
@@ -84,6 +86,14 @@ import { toast } from 'sonner';
 
 function getDaysInMonth(year: number, month: number): number {
   return new Date(year, month, 0).getDate();
+}
+
+function getDayRange(reportType: ReportType, year: number, month: number): number[] {
+  const totalDays = getDaysInMonth(year, month);
+  if (reportType === 'ZENHAN') {
+    return Array.from({ length: 15 }, (_, i) => i + 1);
+  }
+  return Array.from({ length: totalDays - 15 }, (_, i) => i + 16);
 }
 
 function getDayOfWeek(year: number, month: number, day: number): number {
@@ -165,6 +175,15 @@ export function TimesheetEditView() {
   const [reportTypeSaving, setReportTypeSaving] = useState(false);
   const [expandedDays, setExpandedDays] = useState<Set<number>>(new Set());
 
+  // ---- ReportTask state ----
+  type LocalReportTask = {
+    rowNumber: number;
+    taskName: string;
+    prevAccum: number;
+    dailyHours: Record<number, number>; // day -> hours
+  };
+  const [reportTasks, setReportTasks] = useState<LocalReportTask[]>([]);
+
   const year = selectedYear;
   const month = selectedMonth;
   const daysInMonth = getDaysInMonth(year, month);
@@ -174,9 +193,12 @@ export function TimesheetEditView() {
     if (!selectedTimesheetId) return;
     setLoading(true);
     try {
-      const res = await authFetch(`/api/timesheets/${selectedTimesheetId}`);
-      if (res.ok) {
-        const json = await res.json();
+      const [tsRes, rtRes] = await Promise.all([
+        authFetch(`/api/timesheets/${selectedTimesheetId}`),
+        authFetch(`/api/timesheets/${selectedTimesheetId}/report-tasks`),
+      ]);
+      if (tsRes.ok) {
+        const json = await tsRes.json();
         const data = json.data || json;
         setTimesheet(data);
         setEntries(
@@ -188,6 +210,18 @@ export function TimesheetEditView() {
       } else {
         toast.error('勤務表の取得に失敗しました');
         setView('timesheet');
+      }
+      if (rtRes.ok) {
+        const rtJson = await rtRes.json();
+        const tasks: ReportTask[] = rtJson.data || [];
+        setReportTasks(
+          tasks.map((t) => ({
+            rowNumber: t.rowNumber,
+            taskName: t.taskName,
+            prevAccum: t.prevAccum,
+            dailyHours: Object.fromEntries((t.dailyHours || []).map((d) => [d.day, d.hours])),
+          }))
+        );
       }
     } catch {
       toast.error('通信エラーが発生しました');
@@ -309,6 +343,70 @@ export function TimesheetEditView() {
       return prev;
     });
   }, []);
+
+  // ---- ReportTask helpers ----
+  const ensureReportTaskRow = (rowNumber: number) => {
+    setReportTasks((prev) => {
+      if (prev.find((t) => t.rowNumber === rowNumber)) return prev;
+      return [...prev, { rowNumber, taskName: '', prevAccum: 0, dailyHours: {} }].sort((a, b) => a.rowNumber - b.rowNumber);
+    });
+  };
+
+  const updateReportTaskField = (rowNumber: number, field: 'taskName' | 'prevAccum', value: string | number) => {
+    setReportTasks((prev) =>
+      prev.map((t) => t.rowNumber === rowNumber ? { ...t, [field]: value } : t)
+    );
+  };
+
+  const updateReportTaskDay = (rowNumber: number, day: number, hours: number) => {
+    setReportTasks((prev) =>
+      prev.map((t) => t.rowNumber === rowNumber ? { ...t, dailyHours: { ...t.dailyHours, [day]: hours } } : t)
+    );
+  };
+
+  const removeReportTaskRow = (rowNumber: number) => {
+    setReportTasks((prev) => prev.filter((t) => t.rowNumber !== rowNumber));
+  };
+
+  const saveReportTasks = useCallback(async (tasks: LocalReportTask[]) => {
+    if (!selectedTimesheetId) return;
+    try {
+      await authFetch(`/api/timesheets/${selectedTimesheetId}/report-tasks`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          tasks: tasks.map((t) => ({
+            rowNumber: t.rowNumber,
+            taskName: t.taskName,
+            prevAccum: t.prevAccum,
+            dailyHours: Object.entries(t.dailyHours).map(([day, hours]) => ({ day: Number(day), hours })),
+          })),
+        }),
+      });
+    } catch {
+      // silent
+    }
+  }, [selectedTimesheetId]);
+
+  const calcMonthlyTotal = (t: LocalReportTask) =>
+    Object.values(t.dailyHours).reduce((s, h) => s + (h || 0), 0);
+  const calcCumulative = (t: LocalReportTask) =>
+    Math.round((t.prevAccum + calcMonthlyTotal(t)) * 100) / 100;
+
+  // ---- Period Text change handler ----
+  const handlePeriodTextChange = async (value: string) => {
+    if (!selectedTimesheetId) return;
+    setTimesheet((prev) => (prev ? { ...prev, periodText: value } : prev));
+    try {
+      await authFetch(`/api/timesheets/${selectedTimesheetId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ periodText: value }),
+      });
+    } catch {
+      // silent — user sees the value; will retry on next save
+    }
+  };
 
   // ---- Report Type change handler ----
   const handleReportTypeChange = async (value: string) => {
@@ -482,9 +580,23 @@ export function TimesheetEditView() {
     return result;
   }, [entries]);
 
+  // Return list of days with invalid time ranges (end <= start)
+  const findInvalidTimeEntries = useCallback(() => {
+    const working = new Set(['REGULAR', 'HOLIDAY_WORK']);
+    return entries
+      .filter((e) => working.has(e.workType) && (e.startTime || e.endTime))
+      .filter((e) => !isValidTimeRange(e.startTime || '', e.endTime || ''))
+      .map((e) => e.day);
+  }, [entries]);
+
   // ---- Save entries ----
   const handleSave = async () => {
     if (!selectedTimesheetId) return;
+    const invalid = findInvalidTimeEntries();
+    if (invalid.length > 0) {
+      toast.error(`時刻の入力が不正です: ${invalid.join(', ')}日`);
+      return;
+    }
     setSaving(true);
     try {
       const res = await authFetch(`/api/timesheets/${selectedTimesheetId}/entries`, {
@@ -509,6 +621,11 @@ export function TimesheetEditView() {
   // ---- Submit for approval ----
   const handleSubmit = async () => {
     if (!selectedTimesheetId) return;
+    const invalid = findInvalidTimeEntries();
+    if (invalid.length > 0) {
+      toast.error(`時刻の入力が不正です: ${invalid.join(', ')}日`);
+      return;
+    }
     setSubmitting(true);
     try {
       // Save entries first
@@ -592,7 +709,8 @@ export function TimesheetEditView() {
   const isReadOnly = timesheet?.status !== 'DRAFT' && timesheet?.status !== 'REJECTED';
   const isDraft = timesheet?.status === 'DRAFT';
   const status = timesheet?.status || 'DRAFT';
-  const reportType = timesheet?.reportType || 'FULL';
+  const reportType = (timesheet?.reportType || 'ZENHAN') as ReportType;
+  const dayRange = getDayRange(reportType, year, month);
 
   // ---- Loading state ----
   if (loading) {
@@ -708,21 +826,46 @@ export function TimesheetEditView() {
       </div>
 
 
-      {/* Rejected comment */}
-      {status === 'REJECTED' && timesheet.managerComment && (
-        <div>
-          <Card className="border-red-200 bg-red-50/50">
-            <CardContent className="p-4">
-              <div className="flex items-start gap-2">
-                <AlertTriangle className="size-5 text-red-500 shrink-0 mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-red-700">差戻理由</p>
-                  <p className="text-sm text-red-600 mt-1">{timesheet.managerComment}</p>
+      {/* Rejected banner */}
+      {status === 'REJECTED' && (
+        <Card className="border-red-300 bg-red-50">
+          <CardContent className="p-4">
+            <div className="flex items-start gap-3">
+              <AlertTriangle className="size-5 text-red-500 shrink-0 mt-0.5" />
+              <div className="flex-1 min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <p className="text-sm font-semibold text-red-700">差し戻されました</p>
+                  {timesheet.approver?.name && (
+                    <span className="text-xs text-red-500 bg-red-100 px-2 py-0.5 rounded-full">
+                      {timesheet.approver.name}
+                    </span>
+                  )}
+                  {timesheet.approvedAt && (
+                    <span className="text-xs text-red-400">
+                      {new Date(timesheet.approvedAt).toLocaleDateString('ja-JP', { month: 'long', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
+                    </span>
+                  )}
                 </div>
+                {timesheet.managerComment ? (
+                  <p className="text-sm text-red-600 mt-1.5 leading-relaxed border-l-2 border-red-300 pl-2">
+                    {timesheet.managerComment}
+                  </p>
+                ) : (
+                  <p className="text-xs text-red-400 mt-1">理由は記載されていません。内容を確認し修正の上、再提出してください。</p>
+                )}
               </div>
-            </CardContent>
-          </Card>
-        </div>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Approval Chain Progress */}
+      {(status === 'SUBMITTED' || status === 'APPROVED') && timesheet.approvalChainJson && (
+        <ApprovalChainProgress
+          approvalChainJson={timesheet.approvalChainJson}
+          currentApprovalStep={timesheet.currentApprovalStep}
+          status={status}
+        />
       )}
 
       {/* Summary Card */}
@@ -771,7 +914,7 @@ export function TimesheetEditView() {
                 </tr>
               </thead>
               <tbody>
-                {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+                {dayRange.map((day) => {
                   const entry = getOrCreateEntry(day);
                   const dow = getDayOfWeek(year, month, day);
                   const weekend = dow === 0 || dow === 6;
@@ -1047,7 +1190,7 @@ export function TimesheetEditView() {
           <div className="md:hidden">
             <ScrollArea className="h-[calc(100vh-320px)]">
               <div className="p-3 space-y-2">
-                {Array.from({ length: daysInMonth }, (_, i) => i + 1).map((day) => {
+                {dayRange.map((day) => {
                   const entry = getOrCreateEntry(day);
                   const dow = getDayOfWeek(year, month, day);
                   const weekend = dow === 0 || dow === 6;
@@ -1258,6 +1401,166 @@ export function TimesheetEditView() {
         </CardContent>
       </Card>
 
+      {/* Period Text Card */}
+      <Card>
+        <CardHeader className="pb-2">
+          <CardTitle className="text-sm flex items-center gap-2">
+            <ClipboardList className="size-4" />
+            期間業務概要
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="p-4">
+          <Textarea
+            value={timesheet?.periodText || ''}
+            onChange={(e) => handlePeriodTextChange(e.target.value)}
+            disabled={isReadOnly}
+            placeholder="この期間の業務内容・特記事項を入力してください..."
+            rows={3}
+            className="text-sm resize-none"
+          />
+        </CardContent>
+      </Card>
+
+      {/* Report Task Card — 業務報告書 */}
+      <Card>
+        <CardHeader className="pb-2">
+          <div className="flex items-center justify-between">
+            <CardTitle className="text-sm flex items-center gap-2">
+              <BarChart3 className="size-4" />
+              業務報告書
+            </CardTitle>
+            {!isReadOnly && reportTasks.length < 15 && (
+              <Button
+                variant="outline"
+                size="sm"
+                className="h-7 text-xs"
+                onClick={() => {
+                  const next = reportTasks.length === 0 ? 1 : Math.max(...reportTasks.map((t) => t.rowNumber)) + 1;
+                  if (next <= 15) {
+                    const newTasks = [...reportTasks, { rowNumber: next, taskName: '', prevAccum: 0, dailyHours: {} }].sort((a, b) => a.rowNumber - b.rowNumber);
+                    setReportTasks(newTasks);
+                  }
+                }}
+              >
+                <Plus className="size-3 mr-1" />
+                業務追加
+              </Button>
+            )}
+          </div>
+        </CardHeader>
+        <CardContent className="p-0">
+          {reportTasks.length === 0 ? (
+            <div className="px-4 py-8 text-center text-sm text-muted-foreground">
+              {isReadOnly ? '業務報告書の登録はありません。' : '「業務追加」ボタンで業務を登録してください。'}
+            </div>
+          ) : (
+            <div className="overflow-x-auto">
+              <table className="min-w-max w-full text-xs border-collapse">
+                <thead>
+                  <tr className="bg-muted/40 border-b">
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground w-8">No</th>
+                    <th className="text-left px-3 py-2 font-medium text-muted-foreground min-w-[140px]">業務名</th>
+                    <th className="text-center px-2 py-2 font-medium text-muted-foreground w-16">前月繰越</th>
+                    {dayRange.map((d) => (
+                      <th key={d} className="text-center px-1 py-2 font-medium text-muted-foreground w-10">{d}</th>
+                    ))}
+                    <th className="text-center px-2 py-2 font-medium text-muted-foreground w-14">月計</th>
+                    <th className="text-center px-2 py-2 font-medium text-muted-foreground w-14">累計</th>
+                    {!isReadOnly && <th className="w-8" />}
+                  </tr>
+                </thead>
+                <tbody>
+                  {reportTasks.map((task) => {
+                    const monthly = calcMonthlyTotal(task);
+                    const cumul = calcCumulative(task);
+                    return (
+                      <tr key={task.rowNumber} className="border-b hover:bg-muted/20">
+                        <td className="px-3 py-1.5 text-center text-muted-foreground">{task.rowNumber}</td>
+                        <td className="px-2 py-1.5">
+                          <Input
+                            value={task.taskName}
+                            onChange={(e) => updateReportTaskField(task.rowNumber, 'taskName', e.target.value)}
+                            onBlur={() => saveReportTasks(reportTasks)}
+                            disabled={isReadOnly}
+                            placeholder="業務名を入力..."
+                            className="h-7 text-xs min-w-[130px]"
+                          />
+                        </td>
+                        <td className="px-2 py-1.5">
+                          <Input
+                            type="number"
+                            min={0}
+                            step={0.5}
+                            value={task.prevAccum || ''}
+                            onChange={(e) => updateReportTaskField(task.rowNumber, 'prevAccum', parseFloat(e.target.value) || 0)}
+                            onBlur={() => saveReportTasks(reportTasks)}
+                            disabled={isReadOnly}
+                            className="h-7 text-xs w-14 text-center"
+                            placeholder="0"
+                          />
+                        </td>
+                        {dayRange.map((d) => (
+                          <td key={d} className="px-1 py-1.5">
+                            <Input
+                              type="number"
+                              min={0}
+                              step={0.5}
+                              value={task.dailyHours[d] || ''}
+                              onChange={(e) => updateReportTaskDay(task.rowNumber, d, parseFloat(e.target.value) || 0)}
+                              onBlur={() => saveReportTasks(reportTasks)}
+                              disabled={isReadOnly}
+                              className="h-7 text-xs w-10 text-center px-1"
+                              placeholder="0"
+                            />
+                          </td>
+                        ))}
+                        <td className="px-2 py-1.5 text-center font-medium" style={{ fontFamily: 'var(--font-dm-mono)' }}>
+                          {monthly > 0 ? monthly.toFixed(1) : '—'}
+                        </td>
+                        <td className="px-2 py-1.5 text-center font-medium" style={{ color: 'oklch(0.50 0.21 27)', fontFamily: 'var(--font-dm-mono)' }}>
+                          {cumul > 0 ? cumul.toFixed(1) : '—'}
+                        </td>
+                        {!isReadOnly && (
+                          <td className="px-2 py-1.5 text-center">
+                            <button
+                              onClick={() => { removeReportTaskRow(task.rowNumber); saveReportTasks(reportTasks.filter((t) => t.rowNumber !== task.rowNumber)); }}
+                              className="text-muted-foreground hover:text-destructive transition-colors"
+                              title="削除"
+                            >
+                              <Trash2 className="size-3.5" />
+                            </button>
+                          </td>
+                        )}
+                      </tr>
+                    );
+                  })}
+                </tbody>
+                {reportTasks.length > 0 && (
+                  <tfoot>
+                    <tr className="border-t-2 bg-muted/30 font-medium">
+                      <td colSpan={3} className="px-3 py-2 text-xs text-muted-foreground">合計</td>
+                      {dayRange.map((d) => {
+                        const total = reportTasks.reduce((s, t) => s + (t.dailyHours[d] || 0), 0);
+                        return (
+                          <td key={d} className="px-1 py-2 text-center text-xs" style={{ fontFamily: 'var(--font-dm-mono)' }}>
+                            {total > 0 ? total.toFixed(1) : ''}
+                          </td>
+                        );
+                      })}
+                      <td className="px-2 py-2 text-center text-xs font-bold" style={{ fontFamily: 'var(--font-dm-mono)' }}>
+                        {reportTasks.reduce((s, t) => s + calcMonthlyTotal(t), 0).toFixed(1)}
+                      </td>
+                      <td />
+                      {!isReadOnly && <td />}
+                    </tr>
+                  </tfoot>
+                )}
+              </table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
       {/* Feature 3: Project Summary Section */}
       {projectSummary.length > 0 && (
         <div>
@@ -1359,6 +1662,94 @@ export function TimesheetEditView() {
 }
 
 // ---- Sub-components ----
+
+// ---- Approval Chain Progress ----
+
+interface ChainStep {
+  step: number;
+  approverName: string;
+  approverGrade: string;
+}
+
+function ApprovalChainProgress({
+  approvalChainJson,
+  currentApprovalStep,
+  status,
+}: {
+  approvalChainJson: string;
+  currentApprovalStep: number;
+  status: string;
+}) {
+  let chain: ChainStep[] = [];
+  try { chain = JSON.parse(approvalChainJson); } catch { return null; }
+  if (!chain.length) return null;
+
+  const maxStep = chain[chain.length - 1]?.step ?? chain.length;
+
+  return (
+    <Card className="border-blue-200 bg-blue-50/40">
+      <CardContent className="px-4 py-3">
+        <div className="flex items-center gap-1 mb-2.5">
+          <CheckCircle2 className="size-3.5 text-blue-600" />
+          <p className="text-xs font-medium text-blue-700">承認チェーン</p>
+        </div>
+        <div className="flex items-center gap-0 flex-wrap">
+          {chain.map((s, idx) => {
+            const done = status === 'APPROVED'
+              ? true
+              : s.step < currentApprovalStep;
+            const active = s.step === currentApprovalStep && status === 'SUBMITTED';
+            return (
+              <div key={s.step} className="flex items-center">
+                {/* Step node */}
+                <div className="flex flex-col items-center gap-0.5">
+                  <div className={`flex items-center justify-center w-7 h-7 rounded-full border-2 text-xs font-bold transition-colors ${
+                    done   ? 'bg-emerald-500 border-emerald-500 text-white' :
+                    active ? 'bg-blue-500 border-blue-500 text-white animate-pulse' :
+                             'bg-white border-slate-300 text-slate-400'
+                  }`}>
+                    {done ? <CheckCircle2 className="size-3.5" /> : s.step}
+                  </div>
+                  <div className="text-center">
+                    <p className={`text-[9px] font-medium leading-tight ${done ? 'text-emerald-700' : active ? 'text-blue-700' : 'text-muted-foreground'}`}>
+                      {s.approverGrade}
+                    </p>
+                    <p className={`text-[9px] leading-tight max-w-[56px] truncate ${done ? 'text-emerald-600' : active ? 'text-blue-600' : 'text-muted-foreground/70'}`}>
+                      {s.approverName}
+                    </p>
+                  </div>
+                </div>
+                {/* Connector */}
+                {idx < chain.length - 1 && (
+                  <div className={`h-0.5 w-8 mx-1 mb-5 rounded-full ${
+                    s.step < currentApprovalStep || status === 'APPROVED' ? 'bg-emerald-400' : 'bg-slate-200'
+                  }`} />
+                )}
+              </div>
+            );
+          })}
+          {/* Final approved state */}
+          {status === 'APPROVED' && (
+            <div className="flex items-center">
+              <div className="h-0.5 w-8 mx-1 mb-5 rounded-full bg-emerald-400" />
+              <div className="flex flex-col items-center gap-0.5">
+                <div className="flex items-center justify-center w-7 h-7 rounded-full border-2 bg-emerald-500 border-emerald-500 text-white">
+                  <CheckCircle2 className="size-3.5" />
+                </div>
+                <p className="text-[9px] text-emerald-700 font-medium">完了</p>
+              </div>
+            </div>
+          )}
+        </div>
+        <p className="text-[10px] text-muted-foreground mt-2">
+          {status === 'APPROVED'
+            ? 'すべての承認が完了しました'
+            : `ステップ ${currentApprovalStep} / ${maxStep} — ${chain.find(s => s.step === currentApprovalStep)?.approverName ?? ''}さんの承認待ち`}
+        </p>
+      </CardContent>
+    </Card>
+  );
+}
 
 function SummaryItem({
   label,

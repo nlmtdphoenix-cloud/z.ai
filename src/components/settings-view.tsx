@@ -7,9 +7,11 @@ import {
   RotateCcw,
   Loader2,
   Clock,
-  Utensils,
   AlertCircle,
   Info,
+  CalendarDays,
+  Plus,
+  Trash2,
 } from 'lucide-react';
 import { Card, CardContent, CardHeader, CardTitle, CardDescription } from '@/components/ui/card';
 import { Button } from '@/components/ui/button';
@@ -24,6 +26,14 @@ interface SystemConfig {
   DEFAULT_BREAK_MINUTES: string;
 }
 
+interface HolidayRecord {
+  id: string;
+  year: number;
+  month: number;
+  day: number;
+  name: string;
+}
+
 export function SettingsView() {
   const [config, setConfig] = useState<SystemConfig>({
     STANDARD_WORK_HOURS: '8',
@@ -31,6 +41,13 @@ export function SettingsView() {
   });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+
+  // Holiday management state
+  const currentYear = new Date().getFullYear();
+  const [holidayYear, setHolidayYear] = useState(currentYear);
+  const [holidays, setHolidays] = useState<HolidayRecord[]>([]);
+  const [holidayLoading, setHolidayLoading] = useState(false);
+  const [newHoliday, setNewHoliday] = useState({ month: '', day: '', name: '' });
 
   const fetchSettings = useCallback(async () => {
     setLoading(true);
@@ -84,6 +101,59 @@ export function SettingsView() {
       DEFAULT_BREAK_MINUTES: '60',
     });
     toast.info('デフォルト値にリセットしました（保存はしていません）');
+  };
+
+  const fetchHolidays = useCallback(async (year: number) => {
+    setHolidayLoading(true);
+    try {
+      const res = await authFetch(`/api/holidays?year=${year}`);
+      if (res.ok) {
+        const json = await res.json();
+        setHolidays(json.data || []);
+      }
+    } catch { /* silent */ } finally {
+      setHolidayLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { fetchHolidays(holidayYear); }, [holidayYear, fetchHolidays]);
+
+  const handleAddHoliday = async () => {
+    const m = parseInt(newHoliday.month, 10);
+    const d = parseInt(newHoliday.day, 10);
+    if (!m || !d || m < 1 || m > 12 || d < 1 || d > 31) {
+      toast.error('月・日を正しく入力してください');
+      return;
+    }
+    try {
+      const res = await authFetch('/api/holidays', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ year: holidayYear, month: m, day: d, name: newHoliday.name }),
+      });
+      if (res.ok) {
+        toast.success('祝日を追加しました');
+        setNewHoliday({ month: '', day: '', name: '' });
+        fetchHolidays(holidayYear);
+      } else {
+        const json = await res.json().catch(() => ({}));
+        toast.error(json.error || '追加に失敗しました');
+      }
+    } catch {
+      toast.error('通信エラーが発生しました');
+    }
+  };
+
+  const handleDeleteHoliday = async (id: string) => {
+    try {
+      const res = await authFetch(`/api/holidays/${id}`, { method: 'DELETE' });
+      if (res.ok) {
+        toast.success('祝日を削除しました');
+        setHolidays((prev) => prev.filter((h) => h.id !== id));
+      }
+    } catch {
+      toast.error('通信エラーが発生しました');
+    }
   };
 
   if (loading) {
@@ -195,6 +265,106 @@ export function SettingsView() {
                 デフォルトに戻す
               </Button>
             </div>
+          </CardContent>
+        </Card>
+      </div>
+
+      {/* Holiday Management */}
+      <div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="flex items-center gap-2">
+              <CalendarDays className="size-5" />
+              祝日管理
+            </CardTitle>
+            <CardDescription>
+              システムに登録されている祝日の確認・追加・削除ができます
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            {/* Year selector */}
+            <div className="flex items-center gap-2">
+              <Label>対象年</Label>
+              <div className="flex gap-1">
+                {[currentYear - 1, currentYear, currentYear + 1].map((y) => (
+                  <Button
+                    key={y}
+                    variant={y === holidayYear ? 'default' : 'outline'}
+                    size="sm"
+                    onClick={() => setHolidayYear(y)}
+                  >
+                    {y}年
+                  </Button>
+                ))}
+              </div>
+            </div>
+
+            {/* Add new holiday */}
+            <div className="flex items-end gap-2 flex-wrap">
+              <div className="space-y-1">
+                <Label className="text-xs">月</Label>
+                <Input
+                  type="number" min={1} max={12} placeholder="月"
+                  value={newHoliday.month}
+                  onChange={(e) => setNewHoliday((p) => ({ ...p, month: e.target.value }))}
+                  className="w-16 h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1">
+                <Label className="text-xs">日</Label>
+                <Input
+                  type="number" min={1} max={31} placeholder="日"
+                  value={newHoliday.day}
+                  onChange={(e) => setNewHoliday((p) => ({ ...p, day: e.target.value }))}
+                  className="w-16 h-8 text-sm"
+                />
+              </div>
+              <div className="space-y-1 flex-1">
+                <Label className="text-xs">祝日名</Label>
+                <Input
+                  placeholder="例：元日"
+                  value={newHoliday.name}
+                  onChange={(e) => setNewHoliday((p) => ({ ...p, name: e.target.value }))}
+                  className="h-8 text-sm"
+                />
+              </div>
+              <Button size="sm" onClick={handleAddHoliday} className="h-8">
+                <Plus className="size-3.5 mr-1" />
+                追加
+              </Button>
+            </div>
+
+            <Separator />
+
+            {/* Holiday list */}
+            {holidayLoading ? (
+              <div className="flex justify-center py-4">
+                <Loader2 className="size-4 animate-spin text-muted-foreground" />
+              </div>
+            ) : holidays.length === 0 ? (
+              <p className="text-sm text-muted-foreground text-center py-4">
+                {holidayYear}年の祝日が登録されていません
+              </p>
+            ) : (
+              <div className="grid gap-1.5">
+                {holidays.map((h) => (
+                  <div key={h.id} className="flex items-center justify-between py-1.5 px-2 rounded hover:bg-muted/40 group">
+                    <span className="text-sm">
+                      <span className="font-mono text-muted-foreground mr-2">{h.month}/{String(h.day).padStart(2, '0')}</span>
+                      {h.name || '（名称なし）'}
+                    </span>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      className="h-6 w-6 opacity-0 group-hover:opacity-100 text-destructive hover:text-destructive"
+                      onClick={() => handleDeleteHoliday(h.id)}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </Button>
+                  </div>
+                ))}
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

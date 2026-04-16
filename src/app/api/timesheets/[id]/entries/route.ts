@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import type { TimesheetEntry } from '@/lib/types';
-import { getAuthUser, unauthorizedResponse } from '@/lib/auth';
+import { getAuthUser, unauthorizedResponse, forbiddenResponse, canAccessTimesheet } from '@/lib/auth';
 
 type RouteParams = {
   params: Promise<{ id: string }>;
@@ -83,6 +83,11 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    const isApprover = timesheet.approvedById === authUser.userId;
+    if (!canAccessTimesheet(authUser, timesheet.employeeId) && !isApprover) {
+      return forbiddenResponse();
+    }
+
     const entries = await db.timesheetEntry.findMany({
       where: { timesheetId: id },
       orderBy: { day: 'asc' },
@@ -130,6 +135,16 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
         { error: 'Timesheet not found' },
         { status: 404 }
       );
+    }
+
+    const isOwner = timesheet.employeeId === authUser.userId;
+    const isAdmin = authUser.role === 'ADMIN';
+    if (!isOwner && !isAdmin) {
+      return forbiddenResponse();
+    }
+    // Only DRAFT timesheets can have entries modified
+    if (timesheet.status !== 'DRAFT') {
+      return forbiddenResponse('提出済みの勤務表は編集できません');
     }
 
     // Build summary from incoming entries before DB operations
@@ -230,6 +245,13 @@ export async function POST(request: NextRequest, { params }: RouteParams) {
         { error: 'Timesheet not found' },
         { status: 404 }
       );
+    }
+
+    if (timesheet.employeeId !== authUser.userId && authUser.role !== 'ADMIN') {
+      return forbiddenResponse();
+    }
+    if (timesheet.status !== 'DRAFT') {
+      return forbiddenResponse('提出済みの勤務表は編集できません');
     }
 
     // Check for duplicate entry on the same day
