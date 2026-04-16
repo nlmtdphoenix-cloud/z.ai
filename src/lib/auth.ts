@@ -46,10 +46,23 @@ export function unauthorizedResponse(message = '認証が必要です') {
   });
 }
 
-// Return 403 response  
+// Return 403 response
 export function forbiddenResponse(message = '権限がありません') {
   return new Response(JSON.stringify({ error: message }), {
     status: 403,
     headers: { 'Content-Type': 'application/json' },
   });
+}
+
+// Check if user owns the timesheet OR has elevated access (ADMIN/MANAGER).
+// Note: MANAGER visibility should ideally be narrowed to their reporting line,
+// but we allow it here to avoid breaking approval views.
+export function canAccessTimesheet(
+  authUser: TokenPayload,
+  timesheetEmployeeId: string,
+  options: { requireOwner?: boolean } = {},
+): boolean {
+  if (authUser.userId === timesheetEmployeeId) return true;
+  if (options.requireOwner) return false;
+  return authUser.role === 'ADMIN' || authUser.role === 'MANAGER';
 }

@@ -1,10 +1,18 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
-import { signToken, comparePassword, hashPassword } from '@/lib/auth';
+import { signToken, comparePassword } from '@/lib/auth';
 import { seedDatabase } from '@/lib/seed';
+import { rateLimit, clientIdFromRequest } from '@/lib/rate-limit';
+import { isSameOriginRequest, originForbiddenResponse } from '@/lib/origin-check';
+
+const ALLOW_AUTO_SEED = process.env.ALLOW_AUTO_SEED === 'true';
+const LOGIN_LIMIT = 10;
+const LOGIN_WINDOW_MS = 10 * 60 * 1000; // 10 minutes
 
 export async function POST(request: NextRequest) {
   try {
+    if (!isSameOriginRequest(request)) return originForbiddenResponse();
+
     const { email, password } = await request.json();
 
     if (!email) {
@@ -15,8 +23,22 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Password is required' }, { status: 400 });
     }
 
-    // Auto-seed: if no users exist, create demo data synchronously
-    await seedDatabase();
+    // Rate limit by client IP + email to blunt credential brute-force while
+    // still letting legitimate users retry from a shared NAT.
+    const rateKey = `login:${clientIdFromRequest(request)}:${String(email).toLowerCase()}`;
+    const rl = rateLimit(rateKey, LOGIN_LIMIT, LOGIN_WINDOW_MS);
+    if (!rl.allowed) {
+      return NextResponse.json(
+        { error: 'ログイン試行回数が多すぎます。しばらくしてからお試しください' },
+        { status: 429, headers: { 'Retry-After': String(rl.retryAfterSec) } }
+      );
+    }
+
+    // Auto-seed is opt-in via env flag (dev/demo only). In production this must be
+    // done via the explicit /api/seed endpoint, never on the login path.
+    if (ALLOW_AUTO_SEED && process.env.NODE_ENV !== 'production') {
+      await seedDatabase();
+    }
 
     // Find user by email
     const user = await db.user.findUnique({
@@ -31,24 +53,8 @@ export async function POST(request: NextRequest) {
       return NextResponse.json({ error: 'Account is disabled' }, { status: 403 });
     }
 
-    // Verify password
-    let passwordValid = await comparePassword(password, user.password);
-
-    // Backward compatibility: if bcrypt fails AND stored password matches plaintext, allow login
-    // and auto-hash the password for future logins
-    if (!passwordValid && user.password === password) {
-      passwordValid = true;
-      // Auto-hash the plaintext password in the background
-      try {
-        const hashed = await hashPassword(password);
-        await db.user.update({
-          where: { id: user.id },
-          data: { password: hashed },
-        });
-      } catch {
-        // Silently fail auto-hash - user can still login
-      }
-    }
+    // Verify password (bcrypt only — no plaintext fallback)
+    const passwordValid = await comparePassword(password, user.password);
 
     if (!passwordValid) {
       return NextResponse.json({ error: 'Invalid password' }, { status: 401 });
@@ -67,6 +73,8 @@ export async function POST(request: NextRequest) {
       email: user.email,
       name: user.name,
       role: user.role,
+      grade: user.grade,
+      clientSide: user.clientSide,
       employeeId: user.employeeId,
       department: user.departmentName,
       division: user.divisionName,

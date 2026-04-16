@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 
-export type AppView = 'login' | 'dashboard' | 'timesheet' | 'timesheet-edit' | 'approval' | 'employees' | 'organization' | 'settings';
+export type AppView = 'login' | 'dashboard' | 'timesheet' | 'timesheet-edit' | 'approval' | 'monthly-status' | 'leave-balance' | 'compensatory' | 'employees' | 'organization' | 'settings';
 
 interface AppState {
   currentView: AppView;

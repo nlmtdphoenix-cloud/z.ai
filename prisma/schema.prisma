@@ -21,8 +21,8 @@ datasource db {
 // REJECTED - Manager rejected
 
 // Report types
-// FULL - Full monthly report (月末)
-// HALF - Half-month report (月半)
+// ZENHAN - First half report (前半: 1〜15日)
+// KOHAN  - Second half report (後半: 16日〜末日)
 
 // Project task categories
 // DESIGN - 設計業務
@@ -63,6 +63,7 @@ model Division {
   name         String
   order        Int        @default(0)
   isActive     Boolean    @default(true)
+  isVirtual    Boolean    @default(false) // true = 人事総括部など室なし部署の仮想室
   departmentId String
   department   Department @relation(fields: [departmentId], references: [id], onDelete: Cascade)
   groups       Group[]
@@ -81,6 +82,7 @@ model Group {
   divisionId String
   division   Division @relation(fields: [divisionId], references: [id], onDelete: Cascade)
   employees  User[]
+  secondaryMembers UserSecondaryGroup[]
   createdAt  DateTime @default(now())
   updatedAt  DateTime @updatedAt
 
@@ -106,10 +108,13 @@ model User {
   name        String
   password    String   @default("demo123") // simplified for demo
   role        String   @default("EMPLOYEE") // ADMIN, MANAGER, EMPLOYEE
+  grade       String   @default("")         // 社長, G2, M1, M2, L1, L2, TL, S1, S2, S3, S4
+  clientSide  String   @default("")         // TMC側, 東海電化側, etc.
   employeeId  String?  @unique              // e.g. "202503"
   departmentName  String   @default("") // legacy string field
   divisionName    String   @default("")         // e.g. "第1CADデザイン室"
   groupName       String   @default("")         // e.g. "技術第4G"
+  annualLeaveGranted Int  @default(20) // 年次有給付与日数
   isActive    Boolean  @default(true)
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
@@ -122,6 +127,7 @@ model User {
   division      Division?         @relation(fields: [divisionId], references: [id])
   group         Group?            @relation(fields: [groupId], references: [id])
   managedDepartments DepartmentManager[]
+  secondaryGroups    UserSecondaryGroup[]
 
   // Relations
   timesheetsCreated  Timesheet[]   @relation("TimesheetEmployee")
@@ -132,6 +138,20 @@ model User {
   @@index([departmentId])
   @@index([divisionId])
   @@index([role])
+  @@index([grade])
+}
+
+model UserSecondaryGroup {
+  id        String   @id @default(cuid())
+  userId    String
+  groupId   String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  group     Group    @relation(fields: [groupId], references: [id], onDelete: Cascade)
+  createdAt DateTime @default(now())
+
+  @@unique([userId, groupId])
+  @@index([userId])
+  @@index([groupId])
 }
 
 model Timesheet {
@@ -140,7 +160,7 @@ model Timesheet {
   year        Int
   month       Int      // 1-12
   status      String   @default("DRAFT") // DRAFT, SUBMITTED, APPROVED, REJECTED
-  reportType  String   @default("FULL") // FULL, HALF
+  reportType  String   @default("ZENHAN") // ZENHAN, KOHAN
   totalWorkDays       Float  @default(0)
   totalOvertimeHours  Float  @default(0)
   annualLeaveAM       Int    @default(0)
@@ -154,18 +174,25 @@ model Timesheet {
   specialLeave        Int    @default(0)
   absenceDays         Int    @default(0)
   totalWorkHours      Float  @default(0)
+  currentApprovalStep Int      @default(0) // 0=未提出, 1=M承認待ち, 2=G2承認待ち, 3=社長承認待ち
   submittedAt         DateTime?
   approvedAt          DateTime?
   approvedById        String?
   managerComment      String  @default("")
+  periodText          String  @default("") // 期間共通テキスト説明 (前半/後半で一つの説明)
+  // JSON-serialized ApprovalChainStep[] captured at submission time.
+  // Why: reassigning an employee (group/grade) after submission must not change
+  // who can approve the already-submitted timesheet.
+  approvalChainJson   String  @default("")
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   // Relations
-  employee  User             @relation("TimesheetEmployee", fields: [employeeId], references: [id])
-  approver  User?            @relation("TimesheetApprover", fields: [approvedById], references: [id])
-  entries   TimesheetEntry[]
-  approvals Approval[]
+  employee    User             @relation("TimesheetEmployee", fields: [employeeId], references: [id])
+  approver    User?            @relation("TimesheetApprover", fields: [approvedById], references: [id])
+  entries     TimesheetEntry[]
+  approvals   Approval[]
+  reportTasks ReportTask[]
 
   @@unique([employeeId, year, month, reportType])
   @@index([status])
@@ -212,12 +239,13 @@ model WorkTask {
 }
 
 model Approval {
-  id          String   @id @default(cuid())
-  timesheetId String
-  approverId  String
-  action      String   // APPROVED, REJECTED
-  comment     String   @default("")
-  createdAt   DateTime @default(now())
+  id           String   @id @default(cuid())
+  timesheetId  String
+  approverId   String
+  action       String   // APPROVED, REJECTED
+  comment      String   @default("")
+  approvalStep Int      @default(1) // 1=M, 2=G2, 3=社長
+  createdAt    DateTime @default(now())
 
   // Relations
   timesheet Timesheet @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
@@ -225,6 +253,51 @@ model Approval {
 
   @@index([timesheetId])
   @@index([approverId])
+}
+
+model ReportTask {
+  id           String           @id @default(cuid())
+  timesheetId  String
+  rowNumber    Int              // 1-15: тайлан дахь мөрийн дугаар
+  taskName     String           @default("") // 業務名
+  prevAccum    Float            @default(0)  // 前月累計
+  monthlyTotal Float            @default(0)  // 当月合計 (= SUM of dailyHours)
+  cumulative   Float            @default(0)  // 累計 (= prevAccum + monthlyTotal)
+  createdAt    DateTime         @default(now())
+  updatedAt    DateTime         @updatedAt
+
+  timesheet    Timesheet        @relation(fields: [timesheetId], references: [id], onDelete: Cascade)
+  dailyHours   ReportTaskDaily[]
+
+  @@unique([timesheetId, rowNumber])
+  @@index([timesheetId])
+}
+
+model ReportTaskDaily {
+  id           String     @id @default(cuid())
+  reportTaskId String
+  day          Int        // 1-31
+  hours        Float      @default(0)
+  createdAt    DateTime   @default(now())
+  updatedAt    DateTime   @updatedAt
+
+  reportTask   ReportTask @relation(fields: [reportTaskId], references: [id], onDelete: Cascade)
+
+  @@unique([reportTaskId, day])
+  @@index([reportTaskId])
+}
+
+model Holiday {
+  id        String   @id @default(cuid())
+  year      Int
+  month     Int
+  day       Int
+  name      String   @default("")
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  @@unique([year, month, day])
+  @@index([year])
 }
 
 model SystemSettings {

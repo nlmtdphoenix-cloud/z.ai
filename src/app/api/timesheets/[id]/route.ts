@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from 'next/server';
 import { db } from '@/lib/db';
 import { mapTimesheetEmployee } from '@/lib/map-employee';
-import { getAuthUser, unauthorizedResponse } from '@/lib/auth';
+import { getAuthUser, unauthorizedResponse, forbiddenResponse, canAccessTimesheet } from '@/lib/auth';
 
 type RouteParams = {
   params: Promise<{ id: string }>;
@@ -62,6 +62,12 @@ export async function GET(request: NextRequest, { params }: RouteParams) {
       );
     }
 
+    // Owner, approver in chain, ADMIN, or MANAGER can view
+    const isApprover = timesheet.approvedById === authUser.userId;
+    if (!canAccessTimesheet(authUser, timesheet.employeeId) && !isApprover) {
+      return forbiddenResponse();
+    }
+
     return NextResponse.json({ data: mapTimesheetEmployee(timesheet) });
   } catch (error) {
     console.error('Failed to get timesheet:', error);
@@ -92,9 +98,20 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       );
     }
 
-    // Build update data - only allow summary and comment fields
-    const allowedFields = [
-      'status',
+    const isOwner = existing.employeeId === authUser.userId;
+    const isAdmin = authUser.role === 'ADMIN';
+    if (!isOwner && !isAdmin) {
+      return forbiddenResponse();
+    }
+
+    // Owners may only edit their own DRAFT timesheet summary fields.
+    // status / managerComment are never editable via this endpoint — they flow through
+    // submit/approve routes. ADMIN bypasses the DRAFT restriction.
+    if (isOwner && !isAdmin && existing.status !== 'DRAFT') {
+      return forbiddenResponse('提出済みの勤務表は編集できません');
+    }
+
+    const ownerAllowedFields = [
       'totalWorkDays',
       'totalOvertimeHours',
       'annualLeaveAM',
@@ -107,9 +124,13 @@ export async function PUT(request: NextRequest, { params }: RouteParams) {
       'specialLeave',
       'absenceDays',
       'totalWorkHours',
-      'managerComment',
       'reportType',
+      'periodText',
     ];
+    const adminExtraFields = ['status', 'managerComment'];
+    const allowedFields = isAdmin
+      ? [...ownerAllowedFields, ...adminExtraFields]
+      : ownerAllowedFields;
 
     const updateData: Record<string, unknown> = {};
     for (const field of allowedFields) {
@@ -172,6 +193,10 @@ export async function DELETE(request: NextRequest, { params }: RouteParams) {
         { error: 'Timesheet not found' },
         { status: 404 }
       );
+    }
+
+    if (existing.employeeId !== authUser.userId && authUser.role !== 'ADMIN') {
+      return forbiddenResponse();
     }
 
     if (existing.status !== 'DRAFT') {

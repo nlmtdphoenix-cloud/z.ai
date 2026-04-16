@@ -12,6 +12,9 @@ import { ApprovalView } from '@/components/approval-view';
 import { EmployeesView } from '@/components/employees-view';
 import { OrganizationView } from '@/components/organization-view';
 import { SettingsView } from '@/components/settings-view';
+import { MonthlyStatusView } from '@/components/monthly-status-view';
+import { LeaveBalanceView } from '@/components/leave-balance-view';
+import { CompensatoryView } from '@/components/compensatory-view';
 import { Toaster } from '@/components/ui/sonner';
 import { Loader2 } from 'lucide-react';
 
@@ -26,7 +29,7 @@ export default function Home() {
 
   // Render authenticated app layout
   return (
-    <div className="min-h-screen flex flex-col bg-gray-50/50">
+    <div className="min-h-screen flex flex-col bg-background">
       <AppHeader />
       <div className="flex flex-1 overflow-hidden">
         <AppSidebar />
@@ -57,6 +60,12 @@ function ViewRouter({ view }: { view: string }) {
       return <OrganizationView />;
     case 'settings':
       return <SettingsView />;
+    case 'monthly-status':
+      return <MonthlyStatusView />;
+    case 'leave-balance':
+      return <LeaveBalanceView />;
+    case 'compensatory':
+      return <CompensatoryView />;
     default:
       return (
         <div className="flex items-center justify-center h-64">

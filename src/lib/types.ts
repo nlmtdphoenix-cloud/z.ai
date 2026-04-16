@@ -1,5 +1,7 @@
 export type UserRole = 'ADMIN' | 'MANAGER' | 'EMPLOYEE';
 
+export type UserGrade = '社長' | 'G2' | 'M1' | 'M2' | 'L1' | 'L2' | 'TL' | 'S1' | 'S2' | 'S3' | 'S4' | '';
+
 export type TimesheetStatus = 'DRAFT' | 'SUBMITTED' | 'APPROVED' | 'REJECTED';
 
 export type WorkType =
@@ -15,7 +17,7 @@ export type WorkType =
 
 export type ApprovalAction = 'APPROVED' | 'REJECTED';
 
-export type ReportType = 'FULL' | 'HALF';
+export type ReportType = 'ZENHAN' | 'KOHAN';
 
 export type TaskCategory = 'DESIGN' | 'DRAFTING' | 'MEETING' | 'REVIEW' | 'OTHER';
 
@@ -37,6 +39,7 @@ export interface Division {
   name: string;
   order: number;
   isActive: boolean;
+  isVirtual: boolean;
   departmentId: string;
   createdAt: string;
   updatedAt: string;
@@ -58,6 +61,8 @@ export interface Employee {
   email: string;
   name: string;
   role: UserRole;
+  grade: string;
+  clientSide: string;
   employeeId: string;
   department: string;
   division: string;
@@ -65,9 +70,9 @@ export interface Employee {
   departmentId?: string;
   divisionId?: string;
   groupId?: string;
-  department?: Department;
-  division?: Division;
-  group?: Group;
+  departmentObj?: Department;
+  divisionObj?: Division;
+  groupObj?: Group;
   isActive: boolean;
 }
 
@@ -107,15 +112,41 @@ export interface Timesheet {
   specialLeave: number;
   absenceDays: number;
   totalWorkHours: number;
+  currentApprovalStep: number;
   submittedAt: string | null;
   approvedAt: string | null;
   approvedById: string | null;
   managerComment: string;
+  periodText: string;
+  approvalChainJson: string;
   createdAt: string;
   updatedAt: string;
   employee?: Employee;
   approver?: Employee;
   entries?: TimesheetEntry[];
+  reportTasks?: ReportTask[];
+}
+
+export interface ReportTask {
+  id: string;
+  timesheetId: string;
+  rowNumber: number;
+  taskName: string;
+  prevAccum: number;
+  monthlyTotal: number;
+  cumulative: number;
+  createdAt: string;
+  updatedAt: string;
+  dailyHours?: ReportTaskDaily[];
+}
+
+export interface ReportTaskDaily {
+  id: string;
+  reportTaskId: string;
+  day: number;
+  hours: number;
+  createdAt: string;
+  updatedAt: string;
 }
 
 export interface TimesheetEntry {
@@ -150,5 +181,7 @@ export interface Approval {
   approverId: string;
   action: ApprovalAction;
   comment: string;
+  approvalStep: number;
   createdAt: string;
+  approver?: { id: string; name: string; grade: string };
 }

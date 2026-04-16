@@ -22,6 +22,7 @@ import { Button } from '@/components/ui/button';
 import { Badge } from '@/components/ui/badge';
 import { Input } from '@/components/ui/input';
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from '@/components/ui/select';
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter, DialogDescription } from '@/components/ui/dialog';
 import { useAuthStore } from '@/store/auth-store';
 import { useAppStore } from '@/store/app-store';
 import { authFetch } from '@/lib/api';
@@ -37,6 +38,12 @@ export function TimesheetListView() {
   const [filterStatus, setFilterStatus] = useState<string>('all');
   const [searchTerm, setSearchTerm] = useState('');
   const [yearFilter, setYearFilter] = useState<number>(new Date().getFullYear());
+  const [currentPage, setCurrentPage] = useState(1);
+  const nowDate = new Date();
+  const [createDialogOpen, setCreateDialogOpen] = useState(false);
+  const [createYear, setCreateYear] = useState(nowDate.getFullYear());
+  const [createMonth, setCreateMonth] = useState(nowDate.getMonth() + 1);
+  const [creating, setCreating] = useState(false);
 
   const fetchTimesheets = useCallback(async () => {
     if (!user) return;
@@ -79,21 +86,18 @@ export function TimesheetListView() {
 
   const handleCreateTimesheet = async () => {
     if (!user) return;
-    const now = new Date();
-    const year = now.getFullYear();
-    const month = now.getMonth() + 1;
-
+    setCreating(true);
     try {
       const res = await authFetch('/api/timesheets', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ employeeId: user.id, year, month }),
+        body: JSON.stringify({ employeeId: user.id, year: createYear, month: createMonth }),
       });
 
       if (!res.ok) {
         const json = await res.json().catch(() => ({}));
         if (res.status === 409) {
-          toast.error(`${MONTHS_JA[month]}の勤務表は既に存在します`);
+          toast.error(`${createYear}年${MONTHS_JA[createMonth]}の勤務表は既に存在します`);
         } else {
           toast.error(json.error || '作成に失敗しました');
         }
@@ -102,12 +106,15 @@ export function TimesheetListView() {
 
       const json = await res.json();
       const ts = json.data || json;
+      setCreateDialogOpen(false);
       setTimesheetId(ts.id);
       setYearMonth(ts.year, ts.month);
       setView('timesheet-edit');
       toast.success('勤務表を作成しました');
     } catch {
       toast.error('通信エラーが発生しました');
+    } finally {
+      setCreating(false);
     }
   };
 
@@ -137,6 +144,10 @@ export function TimesheetListView() {
 
   const years = Array.from(new Set(timesheets.map((ts) => ts.year))).sort((a, b) => b - a);
 
+  const PAGE_SIZE = 10;
+  const totalPages = Math.max(1, Math.ceil(filteredTimesheets.length / PAGE_SIZE));
+  const pagedTimesheets = filteredTimesheets.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE);
+
   const getStatusIcon = (status: string) => {
     switch (status) {
       case 'DRAFT': return <Clock className="size-3.5" />;
@@ -165,11 +176,65 @@ export function TimesheetListView() {
             月次勤務表の作成・確認・提出を行います
           </p>
         </div>
-        <Button onClick={handleCreateTimesheet}>
+        <Button onClick={() => setCreateDialogOpen(true)}>
           <Plus className="size-4" />
           新規作成
         </Button>
       </div>
+
+      {/* Create Dialog */}
+      <Dialog open={createDialogOpen} onOpenChange={setCreateDialogOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>勤務表の新規作成</DialogTitle>
+            <DialogDescription>対象の年月を選択してください</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            {/* Year selector */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground tracking-wide">年</p>
+              <div className="flex gap-1.5">
+                {[nowDate.getFullYear() - 1, nowDate.getFullYear(), nowDate.getFullYear() + 1].map((y) => (
+                  <button key={y}
+                    onClick={() => setCreateYear(y)}
+                    className="flex-1 py-2 text-sm rounded border transition-colors"
+                    style={{
+                      borderColor: 'oklch(0.870 0.020 75)',
+                      background: y === createYear ? 'oklch(0.50 0.21 27)' : 'transparent',
+                      color: y === createYear ? 'white' : 'inherit',
+                    }}>{y}年</button>
+                ))}
+              </div>
+            </div>
+            {/* Month selector */}
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-muted-foreground tracking-wide">月</p>
+              <div className="grid grid-cols-6 gap-1">
+                {Array.from({ length: 12 }, (_, i) => i + 1).map((m) => (
+                  <button key={m}
+                    onClick={() => setCreateMonth(m)}
+                    className="py-1.5 text-xs rounded border transition-colors"
+                    style={{
+                      borderColor: 'oklch(0.870 0.020 75)',
+                      background: m === createMonth ? 'oklch(0.50 0.21 27)' : 'transparent',
+                      color: m === createMonth ? 'white' : 'inherit',
+                    }}>{m}月</button>
+                ))}
+              </div>
+            </div>
+            <p className="text-center text-sm font-medium" style={{ color: 'oklch(0.18 0.018 52)' }}>
+              {createYear}年{MONTHS_JA[createMonth]}
+            </p>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setCreateDialogOpen(false)}>キャンセル</Button>
+            <Button onClick={handleCreateTimesheet} disabled={creating}>
+              {creating ? <Clock className="size-4 animate-spin" /> : <Plus className="size-4" />}
+              作成する
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       {/* Filters */}
       <Card>
@@ -180,11 +245,11 @@ export function TimesheetListView() {
               <Input
                 placeholder="検索..."
                 value={searchTerm}
-                onChange={(e) => setSearchTerm(e.target.value)}
+                onChange={(e) => { setSearchTerm(e.target.value); setCurrentPage(1); }}
                 className="pl-9"
               />
             </div>
-            <Select value={filterStatus} onValueChange={setFilterStatus}>
+            <Select value={filterStatus} onValueChange={(v) => { setFilterStatus(v); setCurrentPage(1); }}>
               <SelectTrigger className="w-full sm:w-[160px]">
                 <Filter className="size-4 mr-2" />
                 <SelectValue placeholder="ステータス" />
@@ -197,7 +262,7 @@ export function TimesheetListView() {
                 <SelectItem value="REJECTED">差戻し</SelectItem>
               </SelectContent>
             </Select>
-            <Select value={String(yearFilter)} onValueChange={(v) => setYearFilter(Number(v))}>
+            <Select value={String(yearFilter)} onValueChange={(v) => { setYearFilter(Number(v)); setCurrentPage(1); }}>
               <SelectTrigger className="w-full sm:w-[120px]">
                 <SelectValue placeholder="年度" />
               </SelectTrigger>
@@ -226,7 +291,7 @@ export function TimesheetListView() {
         </div>
       ) : (
         <div className="grid gap-3">
-          {filteredTimesheets.map((ts) => (
+          {pagedTimesheets.map((ts) => (
             <div key={ts.id}>
               <Card
                 className="cursor-pointer hover:shadow-md transition-all hover:border-primary/20"
@@ -251,9 +316,9 @@ export function TimesheetListView() {
                             {STATUS_LABELS[ts.status]}
                           </span>
                         </Badge>
-                        {ts.reportType && ts.reportType === 'HALF' && (
-                          <Badge className={`${REPORT_TYPE_COLORS.HALF} text-xs border`}>
-                            {REPORT_TYPE_LABELS.HALF}
+                        {ts.reportType && (ts.reportType === 'ZENHAN' || ts.reportType === 'KOHAN') && (
+                          <Badge className={`${REPORT_TYPE_COLORS[ts.reportType]} text-xs border`}>
+                            {REPORT_TYPE_LABELS[ts.reportType]}
                           </Badge>
                         )}
                       </div>
@@ -308,6 +373,30 @@ export function TimesheetListView() {
               </Card>
             </div>
           ))}
+        </div>
+      )}
+
+      {/* Pagination */}
+      {totalPages > 1 && (
+        <div className="flex items-center justify-between pt-2">
+          <p className="text-xs text-muted-foreground">
+            {filteredTimesheets.length}件中 {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredTimesheets.length)}件
+          </p>
+          <div className="flex items-center gap-1">
+            <Button variant="outline" size="sm" disabled={currentPage === 1} onClick={() => setCurrentPage((p) => p - 1)}>前へ</Button>
+            {Array.from({ length: totalPages }, (_, i) => i + 1).map((p) => (
+              <Button
+                key={p}
+                variant={p === currentPage ? 'default' : 'outline'}
+                size="sm"
+                className="w-8 h-8 p-0"
+                onClick={() => setCurrentPage(p)}
+              >
+                {p}
+              </Button>
+            ))}
+            <Button variant="outline" size="sm" disabled={currentPage === totalPages} onClick={() => setCurrentPage((p) => p + 1)}>次へ</Button>
+          </div>
         </div>
       )}
     </div>

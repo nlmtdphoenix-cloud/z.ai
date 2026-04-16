@@ -10,6 +10,8 @@ export function mapEmployeeFields(emp: Record<string, unknown>) {
     department: emp.departmentName ?? '',
     division: emp.divisionName ?? '',
     group: emp.groupName ?? '',
+    grade: emp.grade ?? '',
+    clientSide: emp.clientSide ?? '',
     departmentName: undefined,
     divisionName: undefined,
     groupName: undefined,

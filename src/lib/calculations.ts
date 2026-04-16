@@ -6,11 +6,24 @@ export function calculateWorkHours(startTime: string, endTime: string, breakMinu
   const [sh, sm] = startTime.split(':').map(Number);
   const [eh, em] = endTime.split(':').map(Number);
 
-  let totalMinutes = (eh * 60 + em) - (sh * 60 + sm);
-  totalMinutes -= breakMinutes;
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return 0;
 
-  if (totalMinutes < 0) return 0;
+  const startMin = sh * 60 + sm;
+  const endMin = eh * 60 + em;
+  // Reject end <= start: caller should surface this as a validation error upstream
+  if (endMin <= startMin) return 0;
+
+  const totalMinutes = endMin - startMin - (breakMinutes || 0);
+  if (totalMinutes <= 0) return 0;
   return Math.round((totalMinutes / 60) * 100) / 100;
+}
+
+export function isValidTimeRange(startTime: string, endTime: string): boolean {
+  if (!startTime || !endTime) return false;
+  const [sh, sm] = startTime.split(':').map(Number);
+  const [eh, em] = endTime.split(':').map(Number);
+  if ([sh, sm, eh, em].some((n) => Number.isNaN(n))) return false;
+  return eh * 60 + em > sh * 60 + sm;
 }
 
 export function calculateOvertime(workHours: number, standard: number = STANDARD_WORK_HOURS): number {
